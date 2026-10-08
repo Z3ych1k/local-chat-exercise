@@ -33,9 +33,18 @@
       <h1 id="setup-title">設定你的聊天伺服器</h1>
       <p>只需要設定一次。API Key 會保存在伺服器本地，之後連入的裝置即可直接對話。</p>
       <form id="setup-form">
-        <label for="api-key">OpenAI API Key</label>
+        <label for="provider">API 服務</label>
+        <select id="provider"><option value="openai">OpenAI</option><option value="fastgpt">FastGPT</option></select>
+        <div id="fastgpt-fields" hidden>
+          <label for="base-url">FastGPT API 地址</label>
+          <input id="base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://你的服務地址/api/v1" maxlength="2048">
+          <label for="app-id">FastGPT App ID</label>
+          <input id="app-id" type="text" autocomplete="off" spellcheck="false" placeholder="你的應用 ID" maxlength="250">
+          <small>在 FastGPT 的應用「發布渠道 → API」取得資料；App ID 也可在應用詳情網址找到。</small>
+        </div>
+        <label id="key-label" for="api-key">OpenAI API Key</label>
         <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" maxlength="8192" required>
-        <p class="setup-billing">OpenAI API 按使用量獨立計費，不使用 ChatGPT／Codex 訂閱額度。</p>
+        <p id="setup-billing" class="setup-billing">OpenAI API 按使用量獨立計費，不使用 ChatGPT／Codex 訂閱額度。</p>
         <button id="save-key" type="submit">驗證並儲存，開始對話 →</button>
       </form>
       <small>Key 不會顯示給其他客戶端。所有連入裝置共用對話紀錄及伺服器額度。</small>
@@ -54,12 +63,13 @@
     </section>
     <section id="conversation" class="conversation" hidden>
       <div class="conversation-heading"><h2 id="chat-title">新對話</h2><div><a id="export" class="text-button" href="#">匯出 JSON</a><button id="delete-chat" class="text-button">刪除</button></div></div>
-      <details class="instructions"><summary>回答指示 <span>設定語言與回答方式</span></summary><label for="instructions" class="sr-only">回答指示</label><textarea id="instructions" maxlength="4000" rows="3"></textarea><button id="save-instructions" class="text-button">儲存指示</button></details>
+      <details id="instructions-panel" class="instructions"><summary>回答指示 <span>設定語言與回答方式</span></summary><label for="instructions" class="sr-only">回答指示</label><textarea id="instructions" maxlength="4000" rows="3"></textarea><button id="save-instructions" class="text-button">儲存指示</button></details>
+      <p id="fastgpt-note" class="privacy-note" hidden>模型、知識庫及回答指示由 FastGPT 應用設定。</p>
       <div id="messages" class="messages" aria-live="polite"></div>
     </section>
     <footer class="composer-area">
       <form id="message-form" class="composer"><label class="sr-only" for="message">你的問題</label><textarea id="message" name="message" placeholder="在這裡寫下你的問題…" rows="2" maxlength="16000" disabled></textarea><div class="composer-bottom"><span id="composer-hint">連線就緒後即可開始 · Enter 傳送，Shift + Enter 換行</span><button id="send" type="submit" aria-label="傳送問題" disabled>↑</button></div></form>
-      <p class="privacy-note">回答由 OpenAI 提供 · 本地紀錄不等於離線回答，問題及相關對話會傳送至 OpenAI</p>
+      <p id="privacy-note" class="privacy-note">本地紀錄不等於離線回答，問題及相關對話會傳送至你設定的 API 服務。</p>
     </footer>
   </main>
 </body>
