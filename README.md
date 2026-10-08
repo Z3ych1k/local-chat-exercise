@@ -4,6 +4,38 @@ Docker 裡的共享網頁聊天程式。首次打開網頁時選擇 OpenAI 或 F
 
 改自 [OpenAI Python quickstart 的 chat-basic 範例](https://github.com/openai/openai-quickstart-python/tree/ec8890d101bdc17d66512d94a76b5e7131d188a1/examples/chat-basic)。原版用記憶體中的全域 history；此 exercise 改為 Responses API、SQLite、共享伺服器憑證、Docker Compose 和測試。`upstream/` 保存原檔，`UPSTREAM.json` 記錄 commit 與 SHA256；MIT 授權。
 
+## 已驗證範圍
+
+截至 2026-10-08，以下是實際完成的驗證，沒有把模擬測試當成帳號或 NAS 的成功證據。
+
+| 項目 | 結果及範圍 |
+| --- | --- |
+| Mac 本地網頁 | Python 3.14.7，以 `python app.py` 啟動；首次設定、真實回答及本地聊天紀錄已確認。測試服務現已按要求關停 |
+| 學校 MaaS／FastGPT | 已用學校服務的真實 Key 完成首次驗證與串流聊天；憑證以 0600 權限保存在本地 |
+| 自動測試 | 11 項通過，涵蓋 CSRF／Host 檢查、SDK 請求格式、對話上下文、設定與紀錄保留、串流失敗及 OAuth 驗證邏輯；使用假的憑證及回應 |
+| Linux Docker | GitHub Actions 已確認映像建置、容器啟動、網頁／健康檢查及重啟後 SQLite 資料保留；沒有在 CI 中使用真實 API Key |
+| 官方 OpenAI／ChatGPT 方案 | 已實作及模擬測試；尚未完成真實 OpenAI Key 或 ChatGPT 方案授權的回答驗證 |
+| fnOS／NAS | 尚未部署；ZeroTier、NAS 資料夾權限及真實容器內 API 連線仍待現場測試 |
+| 可下載映像 | 已提供手動發布 workflow，但尚未發布 GHCR 映像；目前可下載原始碼，用 `compose.yaml` 建置。ARM64 映像亦未實測 |
+
+實際成功的呼叫是「OpenAI Python SDK → 學校 FastGPT 的相容接口 → 應用回覆」，並不是直接向官方 OpenAI 服務取得回答。私密設定、App ID 和聊天內容不包含在此原始碼中。
+
+## 局限性
+
+- **共享使用，沒有個人帳號或權限分隔。** 所有能連入的裝置都可讀取、匯出、刪除全部對話，並使用同一 Key 的額度。首次設定也沒有管理員登入，應在只有擁有人能訪問的環境完成；不適合直接開放公網。
+- **本地保存不等於加密或離線。** Key 和聊天資料以未加密檔案保存；0600 檔案權限不能代替磁碟加密。伺服器管理員、備份或取得磁碟資料的人可能讀取它們。問題及上下文會送到所選 API 服務，對方仍可能按其政策記錄資料。程式本身沒有 HTTPS，對外訪問需另行配置受信任網絡或 HTTPS 入口。
+- **每次只處理一個模型回答。** 另一個同時發送的請求會收到 409，沒有排隊功能。Docker 的 Gunicorn 必須維持一個 worker；鎖是程序內的，增加 worker 不會得到全域並行限制。沒有每位使用者的速率或額度上限，服務端限速及費用仍由 API 平台決定。
+- **只支援文字對話。** 沒有圖片、文件上傳、語音、工具執行或 agent loop；回答以純文字顯示。FastGPT 的知識庫引用卡片、工作流變數、工具事件和會話管理沒有同步到本地介面。
+- **上下文及設定有邊界。** 每次發送完整的成功對話上下文，沒有自動摘要或按 token 截短，長對話可能超出模型上限或增加用量。單次問題上限 16,000 字，整個 JSON 請求上限 64 KiB。FastGPT 的模型、提示詞及知識庫由其應用控制，本地不能覆寫；OpenAI 模型列表也不保證每個模型都支援此程式的 Responses 呼叫。
+- **Key 維護由擁有人處理。** 客戶端不能修改已保存的設定；換 Key／服務需在伺服器終端執行 `set_api_key.py`，該終端操作不會驗證 Key。Key 過期、額度用盡或 FastGPT 工作流改動仍會使回答失敗。首次 FastGPT 驗證會發送一條真實短訊息，可能消耗額度。
+- **環境與版本相容性仍需實測。** Mac 本地預覽已改用不 fork 的啟動方式，以避開此次 Gunicorn／系統代理崩潰。Linux CI 不代表所有 NAS、CPU 架構或 FastGPT 部署版本可用；`python app.py` 供本地測試，正式容器採 Gunicorn。
+
+## 與 Exercise 目標的對照
+
+已涵蓋安裝依賴、修改小程式、用 SDK 發送 API 請求、探索非串流／串流和多輪對話，以及使用學校 MaaS 的 API 地址與憑證。Docker、共享 GUI、SQLite 和 CI 是延伸功能。
+
+如果課程要求直接呼叫官方 OpenAI，還需以真正的 OpenAI API Key 補做驗證；目前學校 MaaS 的成功呼叫不能替代這項證據。README 的文件連結與程式說明也不能代替使用者本人閱讀及理解 API。提交格式及評分仍以課程要求為準。
+
 ## 帳號與存放方式
 
 預設 `AUTH_MODE=api_key`。首次進入網頁會顯示設定介面：選擇服務並輸入設定 → 伺服器驗證連線 → 以 0600 權限儲存在 `data/api-key.json` → 顯示聊天。已有憑證時不再顯示設定頁；客戶端不能覆寫已保存的 Key。重啟或更新容器後仍可使用。
