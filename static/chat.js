@@ -34,7 +34,7 @@ async function refreshServer() {
   connected = status.connected; preferredModel = status.preferred_model;
   const fastgpt = status.provider === "fastgpt";
   $("account-label").textContent = connected ? "伺服器憑證已設定" : "等待首次設定";
-  $("account-note").textContent = status.mode === "chatgpt" ? "使用擁有人的 ChatGPT 方案額度" : fastgpt ? "使用伺服器的 FastGPT 應用" : "使用伺服器的 OpenAI API Key";
+  $("account-note").textContent = !connected ? "儲存設定後即可直接對話" : status.mode === "chatgpt" ? "使用擁有人的 ChatGPT 方案額度" : fastgpt ? "使用伺服器的 FastGPT 應用" : "使用伺服器的 OpenAI API Key";
   $("instructions-panel").hidden = fastgpt; $("fastgpt-note").hidden = !fastgpt;
   document.querySelector(".model-label").textContent = fastgpt ? "APP" : "MODEL";
   $("privacy-note").textContent = `本地紀錄不等於離線回答，問題及相關對話會傳送至 ${fastgpt ? "FastGPT" : "OpenAI"}。`;
