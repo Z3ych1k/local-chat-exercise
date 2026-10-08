@@ -1,18 +1,32 @@
 # Local Chat Exercise
 
-Docker 裡的共享網頁聊天程式。首次打開網頁時輸入 OpenAI API Key，伺服器驗證後存到本地；其他能連入的裝置即可直接提問，毋須逐部登入。聊天紀錄保存在伺服器的 `data/chat.sqlite3`，支援延續對話、回答指示、串流回答、匯出及刪除。
+Docker 裡的共享網頁聊天程式。首次打開網頁時選擇 OpenAI 或 FastGPT 並輸入 API 設定，伺服器驗證後存到本地；其他能連入的裝置即可直接提問，毋須逐部登入。聊天紀錄保存在伺服器的 `data/chat.sqlite3`，支援延續對話、回答指示、串流回答、匯出及刪除。
 
 改自 [OpenAI Python quickstart 的 chat-basic 範例](https://github.com/openai/openai-quickstart-python/tree/ec8890d101bdc17d66512d94a76b5e7131d188a1/examples/chat-basic)。原版用記憶體中的全域 history；此 exercise 改為 Responses API、SQLite、共享伺服器憑證、Docker Compose 和測試。`upstream/` 保存原檔，`UPSTREAM.json` 記錄 commit 與 SHA256；MIT 授權。
 
 ## 帳號與存放方式
 
-預設 `AUTH_MODE=api_key`。首次進入網頁會顯示設定介面：輸入 Key → 伺服器向 OpenAI 驗證 → 以 0600 權限儲存在 `data/api-key.json` → 顯示聊天。已有憑證時不再顯示設定頁；客戶端不能覆寫已保存的 Key。重啟或更新容器後仍可使用。
+預設 `AUTH_MODE=api_key`。首次進入網頁會顯示設定介面：選擇服務並輸入設定 → 伺服器驗證連線 → 以 0600 權限儲存在 `data/api-key.json` → 顯示聊天。已有憑證時不再顯示設定頁；客戶端不能覆寫已保存的 Key。重啟或更新容器後仍可使用。
 
 一般 OpenAI API Key 的 API 使用量獨立計費，不能扣 ChatGPT／Codex 訂閱額度。若要使用 ChatGPT 方案，明確改為 `AUTH_MODE=chatgpt`，並由擁有人執行下面的一次性授權流程；它是另一種憑證，不是可以貼入設定欄的 API Key。兩種模式不會自動互相切換。方案模式須以實際授權、可用模型及回答確認是否獲支援。
 
 所有憑證均留在伺服器掛載的 `data/`。ChatGPT 模式使用 `data/credentials.json` 並自動更新 token。沒有憑證寫入原始碼、Docker 映像或回傳網頁；`data/` 和 `.env` 排除於 Git 及 Docker build。
 
-這是共享空間：能訪問聊天網頁的裝置均可查看、匯出和刪除全部聊天，並消耗擁有人授權的額度。請只讓信任的裝置連入，例如自己的 ZeroTier 網絡；Compose 預設只綁定本機。它不是多人帳號服務，也沒有離線模型。問題和相關對話會傳送至 OpenAI。
+這是共享空間：能訪問聊天網頁的裝置均可查看、匯出和刪除全部聊天，並消耗擁有人授權的額度。請只讓信任的裝置連入，例如自己的 ZeroTier 網絡；Compose 預設只綁定本機。它不是多人帳號服務，也沒有離線模型。問題和相關對話會傳送至你選擇的 OpenAI 或 FastGPT 服務。
+
+## FastGPT 設定
+
+首次設定頁選「FastGPT」，填 API 地址、API Key 和 App ID：
+
+- API 地址以服務的文件為準，通常為 `https://你的服務地址/api/v1`。以 `/api` 結尾時自動補 `/v1`，也接受完整 `/api/v1/chat/completions` 地址。
+- 在 FastGPT 應用「發布渠道 → API」取得 Key；App ID 可在應用詳情網址找到。本程式把 App ID 單獨放在請求內容。
+- 儲存前會發送「連線測試：請只回答 OK。」來驗證應用，可能消耗少量額度。失敗不保存，成功以 0600 權限保存到 `data/api-key.json`。舊版 OpenAI Key 檔案仍可使用。
+- 模型、知識庫、工作流及回答指示由 FastGPT 應用設定。此網頁顯示 FastGPT 應用，隱藏本地回答指示。
+- 使用 Chat Completions 及串流文字回答，不傳 `chatId`，每次以本地 SQLite 的成功對話提供上下文。FastGPT 仍可能按其服務設定記錄請求。
+- 目前沒有同步 FastGPT 的引用卡片、文件上傳或工作流變數；適用一般文字對話應用。
+- 若 FastGPT 也在 Docker 裡，地址須可由聊天容器訪問；容器中的 `localhost` 指容器本身。
+
+參考 [FastGPT API 發布](https://doc.fastgpt.cn/zh-CN/guide/build/publish/openapi) 及 [API 文件介紹](https://doc.fastgpt.cn/zh-CN/openapi/intro)。4.15 起以服務自己生成的 API 文件為準，部署版本差異需以真實連線確認。
 
 ## 本機測試（不用 Docker）
 
@@ -23,7 +37,7 @@ python3 -m venv .venv
 .venv/bin/python app.py
 ```
 
-聊天頁面：`http://127.0.0.1:8080`。在首次設定介面輸入自己的 OpenAI API Key，即可開始；沒有 Key 時仍可執行離線測試，但不會有真實模型回答。
+聊天頁面：`http://127.0.0.1:8080`。在首次設定介面輸入 OpenAI 或 FastGPT 設定，即可開始；沒有 Key 時仍可執行離線測試，但不會有真實模型回答。
 
 只有 ChatGPT 方案模式才需要：先設定 `AUTH_MODE=chatgpt` 再啟動，另開終端，在同一資料夾執行：
 
@@ -46,7 +60,7 @@ chmod 700 data
 docker compose up -d --build
 ```
 
-啟動後進入 `http://127.0.0.1:8080`，首次設定頁輸入 API Key。Key 直接存入掛載資料夾；其他客戶端重新整理後就能聊天。8080 是聊天；1455 只供可選的 ChatGPT 方案授權回呼，綁在主機 127.0.0.1。容器重啟及更新不會刪除 `data/`。
+啟動後進入 `http://127.0.0.1:8080`，首次設定頁選擇 OpenAI 或 FastGPT 並輸入設定。Key 直接存入掛載資料夾；其他客戶端重新整理後就能聊天。8080 是聊天；1455 只供可選的 ChatGPT 方案授權回呼，綁在主機 127.0.0.1。容器重啟及更新不會刪除 `data/`。
 
 若使用自訂 UID/GID，在 `.env` 設定 `CHAT_UID`、`CHAT_GID` 並讓 `data/` 的擁有人一致。Mac Docker Desktop 通常不需 Linux 的 chown 步驟。
 
@@ -92,9 +106,11 @@ docker compose -f compose.image.yaml up -d
 
 核心位於 `app.py` 的 `send_message()`：從 SQLite 讀取完整 history，呼叫官方 OpenAI Python SDK 的 `client.responses.create(...)`，設定 `instructions`、`input`、`store=False`、`stream=True`，逐段回傳文字；收到 `response.completed` 才標記成功。失敗或中斷仍保留問題及收到的文字。
 
+FastGPT 分支改用 `client.chat.completions.create(...)`，傳入 `appId` 和完整對話、逐段回傳文字，收到結束原因才標記成功。測試透過真實 SDK 和假的 HTTP transport 驗證路徑、請求格式、串流及錯誤處理；不消耗真實額度。
+
 `auth.py` 處理 PKCE、state、nonce、JWT 驗證、token 更新及可用模型；`setup_account.py` 只供擁有人在終端設定憑證。`static/chat.js` 處理網頁互動。此版本只做文字對話，沒有執行 shell 或其他工具的 agent loop。
 
-如要更換已保存的 Key，可先停止容器，執行 `set_api_key.py` 在伺服器終端輸入新 Key，再啟動。此管理操作不開放給網頁客戶端。
+如要更換已保存的 Key，可先停止容器，執行 `set_api_key.py` 在伺服器終端選擇服務並輸入新設定（FastGPT 同時輸入地址和 App ID），再啟動。此管理操作不開放給網頁客戶端。
 
 ## 文件
 
