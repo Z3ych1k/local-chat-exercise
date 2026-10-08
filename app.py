@@ -24,7 +24,7 @@ DEFAULT_INSTRUCTIONS = "請以繁體中文回答。協助我理解概念；涉�
 def create_app(data_dir=None):
     directory = Path(data_dir or os.environ.get("DATA_DIR", Path(__file__).parent / "data"))
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    mode = os.environ.get("AUTH_MODE", "chatgpt")
+    mode = os.environ.get("AUTH_MODE", "api_key")
     if mode not in {"chatgpt", "api_key"}:
         raise ValueError("AUTH_MODE 必須是 chatgpt 或 api_key。")
     secret_path = directory / "session-secret.json"
@@ -40,6 +40,7 @@ def create_app(data_dir=None):
     db_path = directory / "chat.sqlite3"
     # ponytail: one process/one shared credential; queue requests if simultaneous use becomes necessary.
     inference_lock = threading.Lock()
+    setup_lock = threading.Lock()
 
     @contextmanager
     def database():
@@ -75,8 +76,8 @@ def create_app(data_dir=None):
         return key
 
     def api_key():
-        path = Path(os.environ.get("OPENAI_API_KEY_FILE", directory / "api-key.txt"))
-        key = os.environ.get("OPENAI_API_KEY", "") or (path.read_text().strip() if path.exists() else "")
+        path = Path(os.environ.get("OPENAI_API_KEY_FILE", directory / "api-key.json"))
+        key = os.environ.get("OPENAI_API_KEY", "") or (json.loads(path.read_text()) if path.exists() else "")
         if not key:
             raise ValueError("伺服器尚未設定 OpenAI API Key，請由擁有人完成設定。")
         return key
@@ -162,6 +163,28 @@ def create_app(data_dir=None):
         except ValueError:
             configured = False
         return jsonify(connected=configured, mode=mode, preferred_model=os.environ.get("OPENAI_MODEL", ""))
+
+    @app.post("/api/setup")
+    def setup():
+        if mode != "api_key":
+            raise ValueError("伺服器目前使用 ChatGPT 方案授權，由擁有人執行一次 setup_account.py。")
+        with setup_lock:
+            try:
+                api_key()
+            except ValueError:
+                pass
+            else:
+                return jsonify(error="伺服器已設定憑證，不能從客戶端覆寫。"), 409
+            key = request.get_json().get("api_key", "")
+            if not isinstance(key, str) or not key.strip() or len(key) > 8192 or any(c.isspace() for c in key.strip()):
+                raise ValueError("請輸入有效的 OpenAI API Key。")
+            key = key.strip()
+            # Check the key before saving it; a rejected key must not lock first-run setup.
+            with OpenAI(api_key=key, base_url="https://api.openai.com/v1", timeout=30, max_retries=0) as client:
+                client.models.list()
+            path = Path(os.environ.get("OPENAI_API_KEY_FILE", directory / "api-key.json"))
+            private_write(path, key)
+        return jsonify(ok=True), 201
 
     @app.get("/api/models")
     def models():

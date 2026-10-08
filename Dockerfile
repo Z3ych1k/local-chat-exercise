@@ -9,4 +9,4 @@ COPY static ./static
 RUN mkdir data && chown chat:chat data
 USER chat
 EXPOSE 8080
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "180", "app:create_app()"]
+CMD ["gunicorn", "--no-control-socket", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "180", "app:create_app()"]

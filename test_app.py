@@ -23,6 +23,9 @@ from auth import ISSUER, SCOPES, private_write
 
 class LocalChatChecks(unittest.TestCase):
     def setUp(self):
+        self.mode_patch = patch.dict(os.environ, {"AUTH_MODE": "chatgpt"})
+        self.mode_patch.start()
+        self.addCleanup(self.mode_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.directory = Path(self.temp.name)
         self.app = create_app(self.directory)
@@ -126,6 +129,28 @@ class LocalChatChecks(unittest.TestCase):
             headers = {"X-CSRF-Token": session["csrf"]}
         self.assertEqual(other.delete(f"/api/chats/{chat}", json={}, headers=headers).status_code, 200)
         self.assertEqual(self.browser.get("/api/chats").json["chats"], [])
+
+    def test_first_run_key_saved_once_and_shared_after_restart(self):
+        with patch.dict(os.environ, {"AUTH_MODE": "api_key"}):
+            app = create_app(self.directory)
+            browser = app.test_client()
+            browser.get("/")
+            with browser.session_transaction() as session:
+                headers = {"X-CSRF-Token": session["csrf"]}
+            self.assertFalse(browser.get("/api/status").json["connected"])
+            with patch("app.OpenAI") as factory:
+                factory.return_value.__enter__.return_value.models.list.return_value.data = [SimpleNamespace(id="gpt-test")]
+                response = browser.post("/api/setup", json={"api_key": "sk-fake-test-only"}, headers=headers)
+                self.assertEqual(response.status_code, 201)
+            path = self.directory / "api-key.json"
+            self.assertEqual(json.loads(path.read_text()), "sk-fake-test-only")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            restored = create_app(self.directory).test_client()
+            status = restored.get("/api/status")
+            self.assertTrue(status.json["connected"])
+            self.assertNotIn(b"sk-fake", status.data)
+            self.assertEqual(browser.post("/api/setup", json={"api_key": "replacement"}, headers=headers).status_code, 409)
+            self.assertEqual(json.loads(path.read_text()), "sk-fake-test-only")
 
     def test_pkce_state_and_replay_rejected(self):
         browser_id = "owner-setup-only"

@@ -8,7 +8,7 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      AUTH_MODE: ${AUTH_MODE:-chatgpt}
+      AUTH_MODE: ${AUTH_MODE:-api_key}
       CHAT_HOSTS: ${CHAT_HOSTS:-127.0.0.1,localhost}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
     restart: unless-stopped

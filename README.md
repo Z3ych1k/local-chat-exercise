@@ -1,14 +1,16 @@
 # Local Chat Exercise
 
-Docker 裡的共享網頁聊天程式。擁有人在伺服器完成一次 ChatGPT 授權，其他能連入的裝置即可直接提問，毋須逐部登入。聊天紀錄保存在伺服器的 `data/chat.sqlite3`，支援延續對話、回答指示、串流回答、匯出及刪除。
+Docker 裡的共享網頁聊天程式。首次打開網頁時輸入 OpenAI API Key，伺服器驗證後存到本地；其他能連入的裝置即可直接提問，毋須逐部登入。聊天紀錄保存在伺服器的 `data/chat.sqlite3`，支援延續對話、回答指示、串流回答、匯出及刪除。
 
 改自 [OpenAI Python quickstart 的 chat-basic 範例](https://github.com/openai/openai-quickstart-python/tree/ec8890d101bdc17d66512d94a76b5e7131d188a1/examples/chat-basic)。原版用記憶體中的全域 history；此 exercise 改為 Responses API、SQLite、共享伺服器憑證、Docker Compose 和測試。`upstream/` 保存原檔，`UPSTREAM.json` 記錄 commit 與 SHA256；MIT 授權。
 
 ## 帳號與存放方式
 
-預設 `AUTH_MODE=chatgpt`，透過官方 Sign in with ChatGPT 的方案使用授權。它不是一般 OpenAI API Key，亦不會自動讀取 Codex 的登入檔案。能否使用你的方案，須以實際授權、模型列表及回答請求確認。官方流程有預覽及客戶端權限限制；有 ChatGPT 帳號不等於這個自建應用必定可用。
+預設 `AUTH_MODE=api_key`。首次進入網頁會顯示設定介面：輸入 Key → 伺服器向 OpenAI 驗證 → 以 0600 權限儲存在 `data/api-key.json` → 顯示聊天。已有憑證時不再顯示設定頁；客戶端不能覆寫已保存的 Key。重啟或更新容器後仍可使用。
 
-OAuth 憑證保存在掛載的 `data/credentials.json`（0600），伺服器自動更新 access token。沒有憑證寫入原始碼、Docker 映像或網頁；`data/` 和 `.env` 均排除於 Git 及 Docker build。備份聊天資料時亦須保護這個資料夾。
+一般 OpenAI API Key 的 API 使用量獨立計費，不能扣 ChatGPT／Codex 訂閱額度。若要使用 ChatGPT 方案，明確改為 `AUTH_MODE=chatgpt`，並由擁有人執行下面的一次性授權流程；它是另一種憑證，不是可以貼入設定欄的 API Key。兩種模式不會自動互相切換。方案模式須以實際授權、可用模型及回答確認是否獲支援。
+
+所有憑證均留在伺服器掛載的 `data/`。ChatGPT 模式使用 `data/credentials.json` 並自動更新 token。沒有憑證寫入原始碼、Docker 映像或回傳網頁；`data/` 和 `.env` 排除於 Git 及 Docker build。
 
 這是共享空間：能訪問聊天網頁的裝置均可查看、匯出和刪除全部聊天，並消耗擁有人授權的額度。請只讓信任的裝置連入，例如自己的 ZeroTier 網絡；Compose 預設只綁定本機。它不是多人帳號服務，也沒有離線模型。問題和相關對話會傳送至 OpenAI。
 
@@ -21,7 +23,9 @@ python3 -m venv .venv
 .venv/bin/python app.py
 ```
 
-聊天頁面：`http://127.0.0.1:8080`。另開終端，在同一資料夾執行：
+聊天頁面：`http://127.0.0.1:8080`。在首次設定介面輸入自己的 OpenAI API Key，即可開始；沒有 Key 時仍可執行離線測試，但不會有真實模型回答。
+
+只有 ChatGPT 方案模式才需要：先設定 `AUTH_MODE=chatgpt` 再啟動，另開終端，在同一資料夾執行：
 
 ```bash
 .venv/bin/python setup_account.py
@@ -40,10 +44,9 @@ mkdir -p data
 sudo chown 10001:10001 data
 chmod 700 data
 docker compose up -d --build
-docker compose exec chat python setup_account.py
 ```
 
-首次授權仍在擁有人瀏覽器完成，憑證直接存入伺服器掛載資料夾。8080 是聊天，1455 是一次性授權回呼；回呼端口只綁在主機 127.0.0.1。設定完成後所有客戶端只用 8080。容器重啟及更新不會刪除 `data/`。
+啟動後進入 `http://127.0.0.1:8080`，首次設定頁輸入 API Key。Key 直接存入掛載資料夾；其他客戶端重新整理後就能聊天。8080 是聊天；1455 只供可選的 ChatGPT 方案授權回呼，綁在主機 127.0.0.1。容器重啟及更新不會刪除 `data/`。
 
 若使用自訂 UID/GID，在 `.env` 設定 `CHAT_UID`、`CHAT_GID` 並讓 `data/` 的擁有人一致。Mac Docker Desktop 通常不需 Linux 的 chown 步驟。
 
@@ -54,10 +57,10 @@ docker compose exec chat python setup_account.py
 ```dotenv
 CHAT_BIND_IP=10.147.17.10
 CHAT_HOSTS=127.0.0.1,localhost,10.147.17.10
-AUTH_MODE=chatgpt
+AUTH_MODE=api_key
 ```
 
-正式聊天網址會是 `http://NAS_ZEROTIER_IP:8080`。首次授權的 127.0.0.1 callback 會到達擁有人的電腦，因此先在擁有人電腦建立 SSH 轉發，再於 NAS 執行 setup：
+正式聊天網址會是 `http://NAS_ZEROTIER_IP:8080`；API Key 模式直接在網頁完成首次設定。只有使用 `AUTH_MODE=chatgpt` 才需要下面的 SSH 流程。首次授權的 127.0.0.1 callback 會到達擁有人的電腦，因此先在擁有人電腦建立 SSH 轉發，再於 NAS 執行 setup：
 
 ```bash
 ssh -L 1455:127.0.0.1:1455 NAS_USER@NAS_ZEROTIER_IP
@@ -80,8 +83,7 @@ docker compose exec chat python setup_account.py
 docker login ghcr.io -u Z3ych1k
 docker compose -f compose.image.yaml pull
 docker compose -f compose.image.yaml up -d
-# 首次授權只做一次：
-docker compose -f compose.image.yaml exec chat python setup_account.py
+
 ```
 
 `compose.image.yaml` 和 `.env`、`data/` 放在同一資料夾。若不使用映像，也可 clone 私人 repo 後用 `compose.yaml` 在 NAS build。
@@ -92,10 +94,11 @@ docker compose -f compose.image.yaml exec chat python setup_account.py
 
 `auth.py` 處理 PKCE、state、nonce、JWT 驗證、token 更新及可用模型；`setup_account.py` 只供擁有人在終端設定憑證。`static/chat.js` 處理網頁互動。此版本只做文字對話，沒有執行 shell 或其他工具的 agent loop。
 
-另保留明確的 `AUTH_MODE=api_key` 選項：用 `set_api_key.py` 在伺服器終端輸入獨立計費的 OpenAI Key。預設不使用它，ChatGPT 授權失敗亦不會自動改用 API Key。
+如要更換已保存的 Key，可先停止容器，執行 `set_api_key.py` 在伺服器終端輸入新 Key，再啟動。此管理操作不開放給網頁客戶端。
 
 ## 文件
 
+- [ChatGPT 與 API 分開計費](https://help.openai.com/en/articles/9039756-managing-billing-settings-on-chatgpt-web-and-platform)
 - [官方模型與 Responses 呼叫](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 - [官方授權與 PKCE](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 - [遠端主機憑證處理](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms)
