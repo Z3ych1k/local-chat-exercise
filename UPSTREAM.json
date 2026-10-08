@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/openai/openai-quickstart-python",
+  "commit": "ec8890d101bdc17d66512d94a76b5e7131d188a1",
+  "files": {
+    "LICENSE": "dcf7927ec000e0bea021baf556c82ad7ac2e96cdd8285a1c8b2a7014e8300c6d",
+    "examples/chat-basic/app.py": "9ea910e9bddb72d2b899d1bb698171966fabb57211839889ff1026f7fc81a8a2",
+    "examples/chat-basic/templates/index.html": "acc62111ae0770abe726fe4a6894bb42a81052415609b622f4860bbc1ce3f27f"
+  }
+}

@@ -1,0 +1,19 @@
+services:
+  chat:
+    image: ghcr.io/z3ych1k/local-chat-exercise:latest
+    user: "${CHAT_UID:-10001}:${CHAT_GID:-10001}"
+    ports:
+      - "${CHAT_BIND_IP:-127.0.0.1}:8080:8080"
+      - "127.0.0.1:1455:1455"
+    volumes:
+      - ./data:/app/data
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-chatgpt}
+      CHAT_HOSTS: ${CHAT_HOSTS:-127.0.0.1,localhost}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
