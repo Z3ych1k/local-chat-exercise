@@ -1,0 +1,66 @@
+<!-- Modified from OpenAI openai-quickstart-python, MIT license. -->
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}">
+  <title>Local Chat · 你的本地對話空間</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
+  <script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Local Chat 主頁"><span class="brand-mark">L<span>•</span></span><span>Local Chat<small>YOUR LOCAL WORKSPACE</small></span></a>
+    <button id="new-chat" class="new-chat" disabled><span>＋</span> 開始新對話</button>
+    <div class="section-label">對話紀錄 <span id="chat-count">0</span></div>
+    <nav id="chat-list" aria-label="已儲存的對話"><p class="quiet">所有對話會保存在這台伺服器。</p></nav>
+    <div class="sidebar-bottom">
+      <div class="local-note"><span class="status-dot"></span> 紀錄保存在伺服器本地</div>
+      <div class="account-card">
+        <span class="account-avatar">◎</span><div><strong id="account-label">檢查伺服器連線…</strong><small id="account-note">憑證由伺服器管理</small></div>
+      </div>
+      <p class="quiet">這是共享對話空間，連入的裝置可查看及操作對話紀錄。</p>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div class="model-control"><span class="model-label">MODEL</span><label class="sr-only" for="model">回答模型</label><select id="model" disabled><option>伺服器設定後選擇模型</option></select><button id="reload-models" class="icon-button" title="重新讀取模型" aria-label="重新讀取模型" disabled>↻</button></div>
+      <span class="saved-pill"><span class="status-dot"></span> 本地儲存</span>
+    </header>
+    <section id="setup-panel" class="setup-panel" hidden aria-labelledby="setup-title">
+      <div class="eyebrow">FIRST-TIME SETUP</div>
+      <h1 id="setup-title">設定你的聊天伺服器</h1>
+      <p>只需要設定一次。API Key 會保存在伺服器本地，之後連入的裝置即可直接對話。</p>
+      <form id="setup-form">
+        <label for="api-key">OpenAI API Key</label>
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" maxlength="8192" required>
+        <p class="setup-billing">OpenAI API 按使用量獨立計費，不使用 ChatGPT／Codex 訂閱額度。</p>
+        <button id="save-key" type="submit">驗證並儲存，開始對話 →</button>
+      </form>
+      <small>Key 不會顯示給其他客戶端。所有連入裝置共用對話紀錄及伺服器額度。</small>
+    </section>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <section id="welcome" class="welcome">
+      <div class="eyebrow">A LITTLE SPACE TO THINK</div>
+      <h1>你的本地<br>對話空間<span>。</span></h1>
+      <p>問一個問題，整理一個想法。<br>對話留在你的伺服器，每次都能接著聊。</p>
+      <div class="suggestions">
+        <button data-prompt="用簡單的例子解釋 Python 的 list 和 dictionary 有甚麼分別。"><span>01</span><strong>弄懂一個概念</strong><small>用例子學習 Python ↗</small></button>
+        <button data-prompt="請解釋這段 Python 程式的流程，並指出可能的錯誤：\n"><span>02</span><strong>一起讀程式</strong><small>逐步理解程式流程 ↗</small></button>
+        <button data-prompt="幫我把以下筆記整理成重點，並提出三條複習問題：\n"><span>03</span><strong>整理你的想法</strong><small>把筆記變成重點 ↗</small></button>
+      </div>
+      <div class="welcome-footnote">伺服器只需設定一次，連入的裝置即可直接提問。</div>
+    </section>
+    <section id="conversation" class="conversation" hidden>
+      <div class="conversation-heading"><h2 id="chat-title">新對話</h2><div><a id="export" class="text-button" href="#">匯出 JSON</a><button id="delete-chat" class="text-button">刪除</button></div></div>
+      <details class="instructions"><summary>回答指示 <span>設定語言與回答方式</span></summary><label for="instructions" class="sr-only">回答指示</label><textarea id="instructions" maxlength="4000" rows="3"></textarea><button id="save-instructions" class="text-button">儲存指示</button></details>
+      <div id="messages" class="messages" aria-live="polite"></div>
+    </section>
+    <footer class="composer-area">
+      <form id="message-form" class="composer"><label class="sr-only" for="message">你的問題</label><textarea id="message" name="message" placeholder="在這裡寫下你的問題…" rows="2" maxlength="16000" disabled></textarea><div class="composer-bottom"><span id="composer-hint">連線就緒後即可開始 · Enter 傳送，Shift + Enter 換行</span><button id="send" type="submit" aria-label="傳送問題" disabled>↑</button></div></form>
+      <p class="privacy-note">回答由 OpenAI 提供 · 本地紀錄不等於離線回答，問題及相關對話會傳送至 OpenAI</p>
+    </footer>
+  </main>
+</body>
+</html>
