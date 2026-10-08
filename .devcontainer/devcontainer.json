@@ -1,0 +1,8 @@
+{
+  "name": "Local Chat Exercise",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {"ghcr.io/devcontainers/features/docker-in-docker:2": {}},
+  "postCreateCommand": "pip install -r requirements.txt",
+  "forwardPorts": [8080],
+  "portsAttributes": {"8080": {"label": "Local Chat", "onAutoForward": "silent"}}
+}
