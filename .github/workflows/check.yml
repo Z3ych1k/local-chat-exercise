@@ -1,0 +1,43 @@
+name: Test and build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Use the runner's UID for the local data mount
+        run: |
+          echo "CHAT_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "CHAT_GID=$(id -g)" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest -v
+      - name: Build and start the container
+        run: |
+          mkdir -p data
+          docker compose up -d --build
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/health; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:8080/health
+          curl --fail http://127.0.0.1:8080/ | grep -q 'Local Chat'
+      - name: Check persistence across a container restart
+        run: |
+          docker compose exec -T chat python -c "import sqlite3; db=sqlite3.connect('/app/data/chat.sqlite3'); db.execute(\"INSERT INTO chats VALUES ('ci-persistence','ci-owner','CI test','',0,0)\"); db.commit()"
+          docker compose restart chat
+          docker compose exec -T chat python -c "import sqlite3; db=sqlite3.connect('/app/data/chat.sqlite3'); assert db.execute(\"SELECT title FROM chats WHERE id='ci-persistence'\").fetchone()[0]=='CI test'"
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose logs
+      - name: Stop test containers
+        if: always()
+        run: docker compose down
