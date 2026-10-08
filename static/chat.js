@@ -32,8 +32,12 @@ async function loadModels() {
 async function refreshServer() {
   const status = await api("/api/status");
   connected = status.connected; preferredModel = status.preferred_model;
+  const fastgpt = status.provider === "fastgpt";
   $("account-label").textContent = connected ? "伺服器憑證已設定" : "等待首次設定";
-  $("account-note").textContent = status.mode === "chatgpt" ? "使用擁有人的 ChatGPT 方案額度" : "使用伺服器的 OpenAI API Key";
+  $("account-note").textContent = status.mode === "chatgpt" ? "使用擁有人的 ChatGPT 方案額度" : fastgpt ? "使用伺服器的 FastGPT 應用" : "使用伺服器的 OpenAI API Key";
+  $("instructions-panel").hidden = fastgpt; $("fastgpt-note").hidden = !fastgpt;
+  document.querySelector(".model-label").textContent = fastgpt ? "APP" : "MODEL";
+  $("privacy-note").textContent = `本地紀錄不等於離線回答，問題及相關對話會傳送至 ${fastgpt ? "FastGPT" : "OpenAI"}。`;
   $("model").replaceChildren();
   if (connected) await loadModels();
   else {
@@ -84,14 +88,26 @@ async function run(action) { try { await action(); } catch (error) { notice(erro
 $("setup-form").addEventListener("submit", event => {
   event.preventDefault();
   run(async () => {
-    $("save-key").disabled = true; $("api-key").disabled = true; notice("正在驗證 API Key…");
+    const body = {provider: $("provider").value, api_key: $("api-key").value,
+                  base_url: $("base-url").value.trim(), app_id: $("app-id").value.trim()};
+    const fields = ["save-key", "api-key", "provider", "base-url", "app-id"];
+    for (const id of fields) $(id).disabled = true;
+    notice(body.provider === "fastgpt" ? "正在測試 FastGPT 應用，可能需要稍等…" : "正在驗證 API Key…");
     try {
-      await api("/api/setup", "POST", {api_key: $("api-key").value});
+      await api("/api/setup", "POST", body);
       $("api-key").value = ""; notice("已保存伺服器憑證，所有客戶端現在可直接對話。");
       await refreshServer();
-    } finally { $("save-key").disabled = false; $("api-key").disabled = false; }
+    } finally { for (const id of fields) $(id).disabled = false; }
   });
 });
+$("provider").onchange = () => {
+  const fastgpt = $("provider").value === "fastgpt";
+  $("fastgpt-fields").hidden = !fastgpt;
+  $("base-url").required = fastgpt; $("app-id").required = fastgpt;
+  $("key-label").textContent = fastgpt ? "FastGPT API Key" : "OpenAI API Key";
+  $("api-key").placeholder = fastgpt ? "FastGPT 的 API Key" : "sk-…";
+  $("setup-billing").textContent = fastgpt ? "驗證會發送一條短測試訊息，可能消耗少量 FastGPT 額度。模型及回答方式在 FastGPT 應用內設定。" : "OpenAI API 按使用量獨立計費，不使用 ChatGPT／Codex 訂閱額度。";
+};
 $("new-chat").onclick = () => run(newChat);
 $("reload-models").onclick = () => run(loadModels);
 $("model").onchange = () => localStorage.setItem("local-chat-model", $("model").value);
