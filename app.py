@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 from uuid import uuid4
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, Response, jsonify, render_template, request, session, stream_with_context
 from openai import APIConnectionError, APIStatusError, OpenAI
@@ -19,6 +20,23 @@ import jwt
 from auth import ChatGPTLogin, private_write
 
 DEFAULT_INSTRUCTIONS = "請以繁體中文回答。協助我理解概念；涉及程式時，提供清楚易明的解釋。"
+
+
+def fastgpt_url(value):
+    if not isinstance(value, str) or len(value) > 2048:
+        raise ValueError("請輸入 FastGPT API 地址。")
+    parsed = urlsplit(value.strip())
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
+            or parsed.password or parsed.query or parsed.fragment or any(c.isspace() for c in value)):
+        raise ValueError("API 地址須為 http／https 網址，不可包含帳密、查詢參數或空白。")
+    path = parsed.path.rstrip("/")
+    if path.endswith("/chat/completions"):
+        path = path[:-len("/chat/completions")]
+    if path.endswith("/api"):
+        path += "/v1"
+    if not path.endswith("/v1"):
+        raise ValueError("請輸入 FastGPT 的 API 地址，通常以 /api/v1 結尾。")
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def create_app(data_dir=None):
@@ -75,11 +93,19 @@ def create_app(data_dir=None):
             raise ValueError("伺服器尚未設定 ChatGPT 憑證，請由擁有人完成一次授權。")
         return key
 
-    def api_key():
+    def api_settings():
         path = Path(os.environ.get("OPENAI_API_KEY_FILE", directory / "api-key.json"))
-        key = os.environ.get("OPENAI_API_KEY", "") or (json.loads(path.read_text()) if path.exists() else "")
+        saved = json.loads(path.read_text()) if path.exists() else ""
+        # Old installations stored just the OpenAI key; keep accepting that format.
+        settings = saved if isinstance(saved, dict) else {"provider": "openai", "api_key": saved}
+        if os.environ.get("OPENAI_API_KEY"):
+            settings = {"provider": "openai", "api_key": os.environ["OPENAI_API_KEY"]}
+        return settings
+
+    def api_key():
+        key = api_settings().get("api_key", "")
         if not key:
-            raise ValueError("伺服器尚未設定 OpenAI API Key，請由擁有人完成設定。")
+            raise ValueError("伺服器尚未設定 API Key，請由擁有人完成設定。")
         return key
 
     def credentials():
@@ -88,6 +114,9 @@ def create_app(data_dir=None):
     def available_models():
         if mode == "chatgpt":
             return login.models(active_account())
+        api_key()
+        if api_settings().get("provider") == "fastgpt":
+            return [{"id": "fastgpt-app", "name": "FastGPT 應用（模型由應用設定）"}]
         with OpenAI(api_key=api_key(), base_url="https://api.openai.com/v1", timeout=30, max_retries=0) as client:
             catalog = client.models.list()
         models = [{"id": item.id, "name": item.id} for item in catalog.data
@@ -136,11 +165,11 @@ def create_app(data_dir=None):
 
     @app.errorhandler(APIStatusError)
     def provider_error(error):
-        return jsonify(error=f"OpenAI 未能完成請求（HTTP {error.status_code}）；請由擁有人檢查授權及額度。"), 502
+        return jsonify(error=f"API 服務未能完成請求（HTTP {error.status_code}）；請檢查地址、Key、App ID 及額度。"), 502
 
     @app.errorhandler(APIConnectionError)
     def connection_error(error):
-        return jsonify(error="伺服器未能連接 OpenAI，請稍後再試。"), 502
+        return jsonify(error="伺服器未能連接 API 服務，請檢查地址及網絡。"), 502
 
     @app.get("/")
     def index():
@@ -162,7 +191,8 @@ def create_app(data_dir=None):
                 configured = login.status()["connected"]
         except ValueError:
             configured = False
-        return jsonify(connected=configured, mode=mode, preferred_model=os.environ.get("OPENAI_MODEL", ""))
+        provider = "chatgpt" if mode == "chatgpt" else api_settings().get("provider", "openai")
+        return jsonify(connected=configured, mode=mode, provider=provider, preferred_model=os.environ.get("OPENAI_MODEL", ""))
 
     @app.post("/api/setup")
     def setup():
@@ -175,15 +205,31 @@ def create_app(data_dir=None):
                 pass
             else:
                 return jsonify(error="伺服器已設定憑證，不能從客戶端覆寫。"), 409
-            key = request.get_json().get("api_key", "")
+            body = request.get_json()
+            provider = body.get("provider", "openai")
+            if provider not in ("openai", "fastgpt"):
+                raise ValueError("請選擇 OpenAI 或 FastGPT。")
+            key = body.get("api_key", "")
             if not isinstance(key, str) or not key.strip() or len(key) > 8192 or any(c.isspace() for c in key.strip()):
-                raise ValueError("請輸入有效的 OpenAI API Key。")
+                raise ValueError("請輸入有效的 API Key。")
             key = key.strip()
-            # Check the key before saving it; a rejected key must not lock first-run setup.
-            with OpenAI(api_key=key, base_url="https://api.openai.com/v1", timeout=30, max_retries=0) as client:
-                client.models.list()
+            settings = {"provider": provider, "api_key": key}
+            if provider == "fastgpt":
+                app_id = body.get("app_id", "")
+                if not isinstance(app_id, str) or not app_id.strip() or len(app_id) > 250 or any(c.isspace() for c in app_id.strip()):
+                    raise ValueError("請輸入有效的 FastGPT App ID。")
+                settings.update(base_url=fastgpt_url(body.get("base_url", "")), app_id=app_id.strip())
+                # FastGPT has no model catalog; validate the application with a short real request.
+                with OpenAI(api_key=key, base_url=settings["base_url"], timeout=90, max_retries=0) as client:
+                    result = client.chat.completions.create(model="fastgpt-app", messages=[{"role": "user", "content": "連線測試：請只回答 OK。"}],
+                                                           stream=False, extra_body={"appId": settings["app_id"], "detail": False})
+                    if not result.choices or not result.choices[0].message.content:
+                        raise ValueError("FastGPT 應用未返回文字，請檢查應用發布及工作流。")
+            else:
+                with OpenAI(api_key=key, base_url="https://api.openai.com/v1", timeout=30, max_retries=0) as client:
+                    client.models.list()
             path = Path(os.environ.get("OPENAI_API_KEY_FILE", directory / "api-key.json"))
-            private_write(path, key)
+            private_write(path, settings if provider == "fastgpt" else key)
         return jsonify(ok=True), 201
 
     @app.get("/api/models")
@@ -239,6 +285,8 @@ def create_app(data_dir=None):
         if model not in {item["id"] for item in available_models()}:
             raise ValueError("請選擇此帳號可用的模型。")
         token = credentials()
+        settings = api_settings() if mode == "api_key" else {"provider": "openai"}
+        is_fastgpt = settings.get("provider") == "fastgpt"
         if not inference_lock.acquire(blocking=False):
             return jsonify(error="上一個回答仍在進行，請稍後再試。"), 409
         try:
@@ -267,23 +315,41 @@ def create_app(data_dir=None):
                 yield event("start", id=message_id)
                 # Exercise core: official SDK + Responses API. OAuth preview requires
                 # full local history, store=False and stream=True; no temperature/max_output_tokens.
-                with OpenAI(api_key=token, base_url="https://api.openai.com/v1", timeout=90, max_retries=0) as client:
-                    with client.responses.create(model=model, instructions=chat["instructions"],
+                with OpenAI(api_key=token, base_url=settings.get("base_url", "https://api.openai.com/v1"), timeout=90, max_retries=0) as client:
+                    if is_fastgpt:
+                        # Omit chatId: local SQLite history supplies context on every request.
+                        with client.chat.completions.create(model=model, messages=history, stream=True,
+                                                            extra_body={"appId": settings["app_id"], "detail": False}) as stream:
+                            for item in stream:
+                                if not item.choices:
+                                    continue
+                                choice = item.choices[0]
+                                delta = choice.delta.content or ""
+                                text += delta
+                                if delta:
+                                    yield event("delta", text=delta)
+                                if choice.finish_reason == "stop":
+                                    state = "complete"
+                                elif choice.finish_reason:
+                                    state = "failed"
+                                    yield event("error", message="FastGPT 回答提前結束；已保留收到的文字。")
+                    else:
+                        with client.responses.create(model=model, instructions=chat["instructions"],
                                                  input=history, store=False, stream=True) as stream:
-                        for item in stream:
-                            if item.type == "response.output_text.delta":
-                                text += item.delta
-                                yield event("delta", text=item.delta)
-                            elif item.type == "response.completed":
-                                state = "complete"
-                            elif item.type in {"response.failed", "response.incomplete", "error"}:
-                                state = "failed"
-                                code = getattr(getattr(item, "error", None), "code", None)
-                                if not code:
-                                    code = getattr(getattr(getattr(item, "response", None), "error", None), "code", "unknown")
-                                note = "方案額度不足或此應用程式未獲授權；請到 ChatGPT 設定查看。" if str(code).startswith("subscription_sharing_") else "OpenAI 未完成回答；可稍後重試。"
-                                yield event("error", message=note)
-                                break
+                            for item in stream:
+                                if item.type == "response.output_text.delta":
+                                    text += item.delta
+                                    yield event("delta", text=item.delta)
+                                elif item.type == "response.completed":
+                                    state = "complete"
+                                elif item.type in {"response.failed", "response.incomplete", "error"}:
+                                    state = "failed"
+                                    code = getattr(getattr(item, "error", None), "code", None)
+                                    if not code:
+                                        code = getattr(getattr(getattr(item, "response", None), "error", None), "code", "unknown")
+                                    note = "方案額度不足或此應用程式未獲授權；請到 ChatGPT 設定查看。" if str(code).startswith("subscription_sharing_") else "OpenAI 未完成回答；可稍後重試。"
+                                    yield event("error", message=note)
+                                    break
                 if state != "complete":
                     if state != "failed":
                         yield event("error", message="連線中斷，回答未完成；已保留問題及收到的文字。")
@@ -293,10 +359,10 @@ def create_app(data_dir=None):
                         yield event("error", message="模型未傳回文字，請換另一個模型再試。")
             except APIStatusError as error:
                 state = "failed"
-                yield event("error", message=f"OpenAI API 未能完成請求（HTTP {error.status_code}）；請由擁有人檢查憑證、額度及模型權限。")
+                yield event("error", message=f"API 服務未能完成請求（HTTP {error.status_code}）；請由擁有人檢查憑證、額度及應用權限。")
             except APIConnectionError:
                 state = "failed"
-                yield event("error", message="未能連接 OpenAI；已保留問題，請稍後重試。")
+                yield event("error", message="未能連接 API 服務；已保留問題，請稍後重試。")
             except Exception:
                 state = "failed"
                 yield event("error", message="回答未完成；已保留問題及收到的文字。")
