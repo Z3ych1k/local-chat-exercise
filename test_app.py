@@ -16,8 +16,10 @@ from urllib.parse import parse_qs, urlparse
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 import jwt
+import httpx2 as httpx
+from openai import OpenAI
 
-from app import create_app
+from app import create_app, fastgpt_url
 from auth import ISSUER, SCOPES, private_write
 
 
@@ -151,6 +153,80 @@ class LocalChatChecks(unittest.TestCase):
             self.assertNotIn(b"sk-fake", status.data)
             self.assertEqual(browser.post("/api/setup", json={"api_key": "replacement"}, headers=headers).status_code, 409)
             self.assertEqual(json.loads(path.read_text()), "sk-fake-test-only")
+
+    def test_fastgpt_real_sdk_setup_stream_history_and_restart(self):
+        requests = []
+
+        def service(request):
+            requests.append((request, json.loads(request.content)))
+            if requests[-1][1]["stream"]:
+                events = [
+                    {"choices": [{"index": 0, "delta": {"content": "測試回答"}, "finish_reason": None}]},
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+                content = "".join("data: " + json.dumps(item) + "\n\n" for item in events) + "data: [DONE]\n\n"
+                return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=content)
+            return httpx.Response(200, json={"choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}]})
+
+        def client_factory(**kwargs):
+            return OpenAI(**kwargs, http_client=httpx.Client(transport=httpx.MockTransport(service)))
+
+        with patch.dict(os.environ, {"AUTH_MODE": "api_key"}), patch("app.OpenAI", side_effect=client_factory):
+            app = create_app(self.directory)
+            browser = app.test_client()
+            browser.get("/")
+            with browser.session_transaction() as session:
+                headers = {"X-CSRF-Token": session["csrf"]}
+            setup = {"provider": "fastgpt", "base_url": "https://fastgpt.example/api", "app_id": "app-test", "api_key": "fastgpt-fake-only"}
+            self.assertEqual(browser.post("/api/setup", json=setup, headers=headers).status_code, 201)
+            self.assertEqual(str(requests[0][0].url), "https://fastgpt.example/api/v1/chat/completions")
+            self.assertEqual(requests[0][0].headers["Authorization"], "Bearer fastgpt-fake-only")
+            self.assertEqual(requests[0][1]["appId"], "app-test")
+            path = self.directory / "api-key.json"
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(path.read_text())["base_url"], "https://fastgpt.example/api/v1")
+            self.assertEqual(browser.get("/api/models").json["models"][0]["id"], "fastgpt-app")
+            self.assertEqual(len(requests), 1)  # No nonexistent /models request to FastGPT.
+            chat_id = browser.post("/api/chats", json={}, headers=headers).json["id"]
+            for question in ["第一個問題", "接續問題"]:
+                response = browser.post(f"/api/chats/{chat_id}/messages", json={"message": question, "model": "fastgpt-app"}, headers=headers)
+                self.assertIn('"status": "complete"', response.get_data(as_text=True))
+            params = requests[-1][1]
+            self.assertEqual(len(params["messages"]), 3)
+            self.assertEqual(params["messages"][1]["content"], "測試回答")
+            self.assertNotIn("chatId", params)
+            self.assertNotIn("instructions", params)
+            restored = create_app(self.directory).test_client()
+            status = restored.get("/api/status")
+            self.assertTrue(status.json["connected"])
+            self.assertEqual(status.json["provider"], "fastgpt")
+            self.assertNotIn(b"fastgpt-fake-only", status.data)
+            self.assertNotIn(b"app-test", status.data)
+            self.assertEqual(restored.get(f"/api/chats/{chat_id}").json["messages"][-1]["content"], "測試回答")
+            self.assertEqual(browser.post("/api/setup", json=setup, headers=headers).status_code, 409)
+
+    def test_fastgpt_rejected_key_and_invalid_config_do_not_save(self):
+        def reject(request):
+            return httpx.Response(401, json={"error": {"message": "secret-provider-error", "type": "invalid_key"}})
+
+        def client_factory(**kwargs):
+            return OpenAI(**kwargs, http_client=httpx.Client(transport=httpx.MockTransport(reject)))
+
+        with patch.dict(os.environ, {"AUTH_MODE": "api_key"}), patch("app.OpenAI", side_effect=client_factory):
+            app = create_app(self.directory)
+            browser = app.test_client()
+            browser.get("/")
+            with browser.session_transaction() as session:
+                headers = {"X-CSRF-Token": session["csrf"]}
+            body = {"provider": "fastgpt", "base_url": "https://fastgpt.example/api/v1", "app_id": "app-test", "api_key": "fake-key"}
+            response = browser.post("/api/setup", json=body, headers=headers)
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn(b"secret-provider-error", response.data)
+            for changes in [{"base_url": "https://user:pass@example.com/api"}, {"base_url": "file:///api/v1"}, {"base_url": "https://example.com/api?token=secret"}, {"app_id": ""}, {"provider": {}}]:
+                self.assertEqual(browser.post("/api/setup", json={**body, **changes}, headers=headers).status_code, 400)
+            self.assertFalse((self.directory / "api-key.json").exists())
+            self.assertFalse(browser.get("/api/status").json["connected"])
+            self.assertEqual(fastgpt_url("http://192.168.1.2:3000/api/v1/chat/completions"), "http://192.168.1.2:3000/api/v1")
 
     def test_pkce_state_and_replay_rejected(self):
         browser_id = "owner-setup-only"
