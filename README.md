@@ -39,6 +39,8 @@ python3 -m venv .venv
 
 聊天頁面：`http://127.0.0.1:8080`。在首次設定介面輸入 OpenAI 或 FastGPT 設定，即可開始；沒有 Key 時仍可執行離線測試，但不會有真實模型回答。
 
+Mac 本地測試請用上述 `python app.py`，不要以 Gunicorn 啟動。Gunicorn 的 fork 子程序與 macOS 系統代理讀取不相容，可在第一次 API 請求時令 Python 崩潰。本地 Flask 服務不使用 fork 或自動重載；Docker 在 Linux 容器內使用 Gunicorn。修改程式後需重新啟動本地服務。
+
 只有 ChatGPT 方案模式才需要：先設定 `AUTH_MODE=chatgpt` 再啟動，另開終端，在同一資料夾執行：
 
 ```bash
